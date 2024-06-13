@@ -1,0 +1,524 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<modification>
+<name>Melhor Envio</name>
+<code>Melhor EnviO</code>
+<version>1.1.0.0</version>
+<author>Opencart Master</author>
+<link>https://www.opencartmaster.com.br</link>
+
+
+<file path="catalog/controller/checkout/confirm.php">
+<operation> 
+<search trim="true"><![CDATA[$this->response->setOutput($this->load->view('default/template/checkout/confirm.tpl', $data));]]></search>
+<add position="after" offset="2"><![CDATA[
+  public function getCotation($url, $json_convert, $header) {
+  $soap_do = curl_init();
+  curl_setopt($soap_do, CURLOPT_URL, $url .'/api/v2/me/shipment/calculate/');
+  curl_setopt($soap_do, CURLOPT_CONNECTTIMEOUT, 10);
+  curl_setopt($soap_do, CURLOPT_TIMEOUT,        10);
+  curl_setopt($soap_do, CURLOPT_CUSTOMREQUEST, "POST");
+  curl_setopt($soap_do, CURLOPT_RETURNTRANSFER, true );
+  curl_setopt($soap_do, CURLOPT_SSL_VERIFYPEER, false);
+  curl_setopt($soap_do, CURLOPT_SSL_VERIFYHOST, false);
+  curl_setopt($soap_do, CURLOPT_POST,           true );
+  curl_setopt($soap_do, CURLOPT_POSTFIELDS,     $json_convert);
+  curl_setopt($soap_do, CURLOPT_HTTPHEADER,     $header);
+  $response = curl_exec($soap_do); 
+  curl_close($soap_do);
+  
+  $retornou = json_decode($response, true);
+  return   $retornou;
+  }
+]]></add>
+</operation>
+<operation> 
+<search trim="true"><![CDATA[$data['column_name'] = $this->language->get('column_name');]]></search>
+<add position="before"><![CDATA[
+ 			if ($this->config->get('melhorenvios_status') == '1' && substr($this->session->data['shipping_method']['code'], 0, 12) == 'melhorenvios') {	
+		    		
+		if ($this->config->get('melhorenvios_type') == 0) {
+            $url    = 'https://melhorenvio.com.br';
+            $token  = $this->config->get('melhorenvios_token');    
+        } else {
+            $url    = 'https://sandbox.melhorenvio.com.br';
+            $token  = $this->config->get('melhorenvios_token');        
+        }
+		
+		$tkn = "T3BlbkNhcnQgTWFzdGVyIChzdXBvcnRlQG9wZW5jYXJ0bWFzdGVyLmNvbS5icik=";
+		$header = array('Accept: application/json', 'Content-Type: application/json;charset=UTF-8', 'Authorization: Bearer '. $token, 'User-Agent: ' . base64_decode($tkn) );
+
+        $prod = array();
+        $prods2 = array();
+
+		foreach ($this->cart->getProducts() as $product) {
+			if ($product['shipping']) {
+				$prod[] = array('id' => $product['name'],  'width' => number_format($this->length->convert($product['width'], $product['length_class_id'], $this->config->get('config_length_class_id')), 1), 'height' => number_format($this->length->convert($product['height'], $product['length_class_id'], $this->config->get('config_length_class_id')), 1), 'length' => number_format($this->length->convert($product['length'] , $product['length_class_id'], $this->config->get('config_length_class_id')), 1),'weight' => number_format($this->weight->convert($product['weight2'], $product['weight_class_id'], $this->config->get('config_weight_class_id')), 1), 'insurance_value' => number_format($product['price'], 2, '.', ''), 'quantity' => (int)$product['quantity']);
+			    $prods2[] = array('name' => $product['name'], 'quantity' => $product['quantity'], 'unitary_value' => number_format($product['price'], 2, '.', ''));
+			    
+			}
+		}
+
+        if($this->config->get('melhorenvios_ar') == 0) {
+			$ar = false;
+		} else {
+			$ar = true;
+		}
+		
+		if($this->config->get('melhorenvios_mp') == 0) {
+			$mp = false;
+		} else {
+			$mp = true;
+		}
+
+        if($this->config->get('melhorenvios_col') == 0) {
+			$col = false;
+		} else {
+			$col = true;
+		}
+		
+		$postcode = preg_replace("/[^0-9]/", "", $order_data['shipping_postcode']);
+		$postcode2 = preg_replace("/[^0-9]/", "", $this->config->get('melhorenvios_postcode'));
+		$service = array(str_replace('melhorenvios.', '', $this->session->data['shipping_method']['code']));
+        $ie = preg_replace("/[^0-9]/", "", $this->config->get('melhorenvios_ie'));
+		
+		$json_convert  = json_encode(array('from' => array('postal_code' => $postcode2), 'to' => array('postal_code' => $postcode), 'products' => $prod, 'options' => array('receipt' => $ar, 'own_hand' => $mp, 'collect' => $col)));
+        
+        $getquote = $this->getCotation($url, $json_convert, $header);
+		
+		   if (array_key_exists("message", $getquote)) {
+		    $ativar = false;
+	       } else {
+		    $ativar = true;
+		   }
+
+          if($this->config->get('melhorenvios_security') == 1) {
+          $seguro = true;
+          } else {
+          $seguro = false;
+          }
+	
+	       if($ativar) { 
+	           $prodss_ = array();
+	           $volumes_ = array();
+    		   foreach($getquote as $value)	{
+    		     if (!array_key_exists("error", $value) && in_array($value['id'], $service)) {
+    		       $contar = count($value['packages']);
+    		       for ($i = 0; $i < $contar; $i ++) {
+    		           
+    		           $conta2 = count($value['packages'][$i]['products']);
+    		          
+        		       $phei[$i] = $value['packages'][$i]['dimensions']['height'];
+        		       $pwid[$i] = $value['packages'][$i]['dimensions']['width'];
+        		       $plen[$i] = $value['packages'][$i]['dimensions']['length'];
+        		       $pwei[$i] = $value['packages'][$i]['weight'];
+        		       $ppri[$i] = $seguro ? 0 : $value['packages'][$i]['insurance_value'];
+        		       for($x = 0; $x < $conta2; $x++) {
+                           $prodss_[$i] = array('name' => $value['packages'][$i]['products'][$x]['id'], 'quantity' => $value['packages'][$i]['products'][$x]['quantity'], 'unitary_value' => $ppri[$i]);
+        		       }
+        		      
+    		      }
+    	  	    }
+		   } 
+		
+		   if(strlen(preg_replace("/[^0-9]/", "", $this->config->get('melhorenvios_doc'))) > 11) {
+		    $document = 'company_document';
+		   } else {
+		    $document = 'document'; 
+		   }
+		   
+		   $madrress = explode(":", $this->config->get('melhorenvios_ad'));
+		   
+		   $cnome = $order_data['shipping_firstname'] .' ' .$order_data['shipping_lastname'];
+		   $cmail = $customer_info['email'];
+		   $cphone = preg_replace("/[^0-9]/", "",$customer_info['telephone']);
+		   $cnumcom = $order_data['shipping_custom_field'];
+		   $cpfcnpj = $order_data['custom_field'];
+		   $number = $cnumcom[$this->config->get('melhorenvios_doc3')];
+		   if($this->config->get('melhorenvios_doc4')) {
+		   $comple = $cnumcom[$this->config->get('melhorenvios_doc4')];
+		   } else {
+		   $comple = '';    
+		   }
+           if(array_key_exists($this->config->get('melhorenvios_doc2'), $cpfcnpj)) {
+           $cdoc = preg_replace("/[^0-9]/", "",$cpfcnpj[$this->config->get('melhorenvios_doc2')]);
+           } elseif (array_key_exists($this->config->get('melhorenvios_doc2a'), $cpfcnpj)) {
+           $cdoc = preg_replace("/[^0-9]/", "",$cpfcnpj[$this->config->get('melhorenvios_doc2a')]);
+           } else {
+           $cdoc = preg_replace("/[^0-9]/", "",$cpfcnpj[$this->config->get('melhorenvios_doc2')]);
+           }
+		   $caddr = $this->session->data['shipping_address']['address_1'];
+		   $caddr2 = $this->session->data['shipping_address']['address_2'];
+		   $ccity = $this->session->data['shipping_address']['city'];
+		   $czone = $this->session->data['shipping_address']['zone_id'];
+		   $ccep = preg_replace("/[^0-9]/", "",$this->session->data['shipping_address']['postcode']);
+		   
+		   
+		   if(strlen(preg_replace("/[^0-9]/", "", $cdoc)) > 11) {
+		    $document2 = 'company_document';
+		   } else {
+		    $document2 = 'document'; 
+		   }
+
+           $zone_query = $this->db->query("SELECT * FROM `" . DB_PREFIX . "zone` WHERE zone_id = '" . (int)$czone . "'");
+           if ($zone_query->num_rows) {
+            $cst = $zone_query->row['code'];
+           } else {
+            $cst = '';
+           }
+		   
+		   $lurl = HTTPS_SERVER .'index.php?route=account/order/info&order_id='.(int)$this->session->data['order_id'];
+
+        if($this->config->get('melhorenvios_ar') == 0) {
+			$ar = false;
+		} else {
+			$ar = true;
+		}
+		
+		if($this->config->get('melhorenvios_mp') == 0) {
+			$mp = false;
+		} else {
+			$mp = true;
+		}
+
+        if($this->config->get('melhorenvios_col') == 0) {
+			$col = false;
+		} else {
+			$col = true;
+		}
+  
+        if ($this->session->data['shipping_method']['code'] == 'melhorenvios.15' || $this->session->data['shipping_method']['code'] == 'melhorenvios.16') {
+         $agency = $this->config->get('melhorenvios_agency2');
+        } elseif ($this->session->data['shipping_method']['code'] == 'melhorenvios.3' || $this->session->data['shipping_method']['code'] == 'melhorenvios.4') {
+         $agency = $this->config->get('melhorenvios_agency');
+        } else {
+         $agency = '';
+        }
+		   
+		   if ($this->session->data['shipping_method']['code'] == 'melhorenvios.1' || $this->session->data['shipping_method']['code'] == 'melhorenvios.2' || $this->session->data['shipping_method']['code'] == 'melhorenvios.17') {
+		       $servico = '';
+		       $servico2 = '';
+		       for($x = 0; $x < $contar; $x++){
+		       $volumes_[$x]  = array('height' => $phei[$x], 'width' => $pwid[$x], 'length' => $plen[$x], 'weight' => $pwei[$x]);
+		   
+		       $servico .= json_encode(array('service' => str_replace('melhorenvios.', '', $this->session->data['shipping_method']['code']), 'agency' => $agency, 'from' => array('name' => $this->config->get('config_owner'), 'phone' => $this->config->get('config_telephone'), 'email' => $this->config->get('config_email'), $document => $this->config->get('melhorenvios_doc'), 'state_register' => $ie, 'address' => $madrress[0], 'complement' => $madrress[2], 'number' => $madrress[1], 'district' => $madrress[3], 'city' => $madrress[4], 'country_id' => 'BR', 'postal_code' => $postcode2, 'note' => '' ), 'to' => array('name' => $cnome, 'phone' => $cphone, 'email' => $cmail, $document2 => $cdoc, 'address' => $caddr, 'complement' => $comple, 'number' => $number, 'district' => $caddr2, 'city' => $ccity, 'state_abbr' => $cst, 'country_id' => 'BR', 'postal_code' => $ccep, 'note' => '' ), 'products' => [$prodss_[$x]], 'volumes' => array('height' => $phei[$x], 'width' => $pwid[$x], 'length' => $plen[$x], 'weight' => $pwei[$x]), 'options' => array('insurance_value' => $ppri[$x], 'receipt' => $ar, 'own_hand' => $mp, 'collect' => $col, 'reverse' => false, 'non_commercial' => true, 'platform' => 'Opencart - Master', 'tags' => array('tags' => (int)$this->session->data['order_id'], 'url' => $lurl)))). "||";
+		       $servico2 .= json_encode(array('service' => str_replace('melhorenvios.', '', $this->session->data['shipping_method']['code']), 'agency' => $agency, 'from' => array('name' => $this->config->get('config_owner'), 'phone' => $this->config->get('config_telephone'), 'email' => $this->config->get('config_email'), $document => $this->config->get('melhorenvios_doc'), 'state_register' => $ie, 'address' => $madrress[0], 'complement' => $madrress[2], 'number' => $madrress[1], 'district' => $madrress[3], 'city' => $madrress[4], 'country_id' => 'BR', 'postal_code' => $postcode2, 'note' => '' ), 'to' => array('name' => $cnome, 'phone' => $cphone, 'email' => $cmail, $document2 => $cdoc, 'address' => $caddr, 'complement' => $comple, 'number' => $number, 'district' => $caddr2, 'city' => $ccity, 'state_abbr' => $cst, 'country_id' => 'BR', 'postal_code' => $ccep, 'note' => '' ), 'products' => [$prodss_[$x]], 'volumes' => array('height' => $phei[$x], 'width' => $pwid[$x], 'length' => $plen[$x], 'weight' => $pwei[$x]), 'options' => array('insurance_value' => $ppri[$x], 'receipt' => $ar, 'own_hand' => $mp, 'collect' => $col, 'reverse' => false, 'non_commercial' => false, 'invoice' => array('key' => 'NOTA-FISCAL'), 'platform' => 'Opencart - Master', 'tags' => array('tags' => (int)$this->session->data['order_id'], 'url' => $lurl)))). "||";
+
+		       }
+		   } else {
+           for($x = 0; $x < $contar; $x++){
+		       $volumes_[$x]  = array('height' => $phei[$x], 'width' => $pwid[$x], 'length' => $plen[$x], 'weight' => $pwei[$x]);
+           }   
+		       
+		   $servico = json_encode(array('service' => str_replace('melhorenvios.', '', $this->session->data['shipping_method']['code']), 'agency' => $agency, 'from' => array('name' => $this->config->get('config_owner'), 'phone' => $this->config->get('config_telephone'), 'email' => $this->config->get('config_email'), $document => $this->config->get('melhorenvios_doc'), 'state_register' => $ie, 'address' => $madrress[0], 'complement' => $madrress[2], 'number' => $madrress[1], 'district' => $madrress[3], 'city' => $madrress[4], 'country_id' => 'BR', 'postal_code' => $postcode2, 'note' => '' ), 'to' => array('name' => $cnome, 'phone' => $cphone, 'email' => $cmail, $document2 => $cdoc, 'address' => $caddr, 'complement' => $comple, 'number' => $number, 'district' => $caddr2, 'city' => $ccity, 'state_abbr' => $cst, 'country_id' => 'BR', 'postal_code' => $ccep, 'note' => '' ), 'products' => $prods2, 'volumes' => $volumes_, 'options' => array('insurance_value' => number_format($this->cart->getTotal(), 2, '.', ''), 'receipt' => $ar, 'own_hand' => $mp, 'collect' => $col, 'reverse' => false, 'non_commercial' => true, 'platform' => 'Opencart - Master', 'tags' => array('tags' => (int)$this->session->data['order_id'], 'url' => $lurl))));
+
+            $servico2 = json_encode(array('service' => str_replace('melhorenvios.', '', $this->session->data['shipping_method']['code']), 'agency' => $agency, 'from' => array('name' => $this->config->get('config_owner'), 'phone' => $this->config->get('config_telephone'), 'email' => $this->config->get('config_email'), $document => $this->config->get('melhorenvios_doc'), 'state_register' => $ie, 'address' => $madrress[0], 'complement' => $madrress[2], 'number' => $madrress[1], 'district' => $madrress[3], 'city' => $madrress[4], 'country_id' => 'BR', 'postal_code' => $postcode2, 'note' => '' ), 'to' => array('name' => $cnome, 'phone' => $cphone, 'email' => $cmail, $document2 => $cdoc, 'address' => $caddr, 'complement' => $comple, 'number' => $number, 'district' => $caddr2, 'city' => $ccity, 'state_abbr' => $cst, 'country_id' => 'BR', 'postal_code' => $ccep, 'note' => '' ), 'products' => $prods2, 'volumes' => $volumes_, 'options' => array('insurance_value' => number_format($this->cart->getTotal(), 2, '.', ''), 'receipt' => $ar, 'own_hand' => $mp, 'collect' => $col, 'reverse' => false, 'non_commercial' => false, 'invoice' => array('key' => 'NOTA-FISCAL'), 'platform' => 'Opencart - Master', 'tags' => array('tags' => (int)$this->session->data['order_id'], 'url' => $lurl))));
+		   }
+		   
+		    $os_query = $this->db->query("SELECT * FROM `" . DB_PREFIX . "order_shipping` WHERE order_id = '" . (int)$this->session->data['order_id'] . "'");
+
+			if ($os_query->num_rows) {
+		 	  $this->db->query("UPDATE " . DB_PREFIX . "order_shipping SET service = '" . $this->db->escape($servico) . "', service2 = '" . $this->db->escape($servico2) . "',date_modified = NOW() WHERE order_id = '" . (int)$this->session->data['order_id'] . "'");
+			} else {
+			  $this->db->query("INSERT INTO " . DB_PREFIX . "order_shipping SET order_id = '" . (int)$this->session->data['order_id'] . "', service = '" . $this->db->escape($servico) . "', service2 = '" . $this->db->escape($servico2) . "', date_added = NOW()");  
+			}
+		}
+        
+		}
+]]></add>
+</operation>
+</file>
+	
+<file path="catalog/model/checkout/order.php">
+<operation> 
+<search trim="true"><![CDATA[$this->db->query("DELETE FROM `" . DB_PREFIX . "order_history` WHERE order_id = '" . (int)$order_id . "'");]]></search>
+<add position="after"><![CDATA[
+$this->db->query("DELETE FROM `" . DB_PREFIX . "order_shipping` WHERE order_id = '" . (int)$order_id . "'");
+]]></add>
+</operation>
+</file>
+	
+<file path="admin/controller/sale/order.php">
+<operation> 
+<search trim="true"><![CDATA['customer'      => $result['customer'],]]></search>
+<add position="after"><![CDATA['ver'      => $this->checkF($result['order_id']),'nfe'      => $this->checkN($result['order_id']),'post'      => $this->checkP($result['order_id']),]]></add>
+</operation>
+<operation> 
+<search trim="true"><![CDATA[$data['text_missing'] = $this->language->get('text_missing');]]></search>
+<add position="after"><![CDATA[
+if ($this->config->get('melhorenvios_tde') == 0 ){
+$data['declaracao'] = true;
+} else {
+$data['declaracao'] = false;
+}
+]]></add>
+</operation>
+<operation> 
+<search trim="true"><![CDATA[public function shipping() {]]></search>
+<add position="before"><![CDATA[
+public function nota() {
+    $json = array();
+
+		if ($this->request->server['REQUEST_METHOD'] == 'POST') {
+		    $nfe = 'nf'.(int)$this->request->get['order_id'];
+			if (empty($this->request->get[$nfe])) {
+				$json['error'] = "Informe um número de Nota Fiscal para o Pedido " .(int)$this->request->get['order_id'];
+			}
+
+
+			if (!isset($json['error'])) {
+			    $this->db->query("UPDATE `" . DB_PREFIX . "order_shipping` SET nfe = '" . $this->request->get[$nfe] . "' WHERE order_id = '" . (int)$this->request->get['order_id'] . "'");
+
+				$json['success'] = "Nota Fiscal anexada com sucesso! PEDIDO Nº " .(int)$this->request->get['order_id'];
+			}
+		}
+
+		$this->response->addHeader('Content-Type: application/json');
+		$this->response->setOutput(json_encode($json));    
+    }
+
+ public function checkF($order_id) {
+ $this->load->model('sale/order');
+ $os_query = $this->db->query("SELECT * FROM `" . DB_PREFIX . "order_shipping` WHERE order_id = '" . (int)$order_id . "'");
+ if ($os_query->num_rows) {
+	        return true;	 
+            } else {
+            return false;	
+            }
+ }
+
+public function checkN($order_id) {
+ $this->load->model('sale/order');
+ $val = '';
+ $os_query = $this->db->query("SELECT * FROM `" . DB_PREFIX . "order_shipping` WHERE order_id = '" . (int)$order_id . "'");
+ if ($os_query->num_rows) {
+	        return $os_query->row['nfe'];	 
+            } else {
+            return $val;	
+            }
+ }
+
+ public function checkP($order_id) {
+ $this->load->model('sale/order');
+ $os_query = $this->db->query("SELECT * FROM `" . DB_PREFIX . "order_shipping` WHERE order_id = '" . (int)$order_id . "' AND post ='1'");
+ if ($os_query->num_rows) {
+	        return true;	 
+            } else {
+            return false;	
+            }
+ }
+
+  public function frete() {
+  $this->load->language('sale/order');
+
+  $this->document->setTitle($this->language->get('heading_title'));
+
+  $this->load->model('sale/order');
+
+		if (isset($this->request->get['order_id'])) {
+			$order_id = $this->request->get['order_id'];
+            $os_query = $this->db->query("SELECT * FROM `" . DB_PREFIX . "order_shipping` WHERE order_id = '" . (int)$order_id . "'");
+            if ($os_query->num_rows) {
+	        $json_convert = $os_query->row['service'];	 	 
+            }else {
+            $json_convert = '';	
+            }
+		} else {
+			$order_id = 0;
+            $json_convert = '';	
+		}
+
+  if ($this->config->get('melhorenvios_type') == 0) {
+  $url    = 'https://melhorenvio.com.br';
+  $token  = $this->config->get('melhorenvios_token');    
+  } else {
+  $url    = 'https://sandbox.melhorenvio.com.br';
+  $token  = $this->config->get('melhorenvios_token');        
+  }		  
+		
+  $tkn = "T3BlbkNhcnQgTWFzdGVyIChzdXBvcnRlQG9wZW5jYXJ0bWFzdGVyLmNvbS5icik=";
+  $header = array('Accept: application/json', 'Content-Type: application/json;charset=UTF-8', 'Authorization: Bearer '. $token, 'User-Agent: ' . base64_decode($tkn) );
+
+  $order_info = $this->model_sale_order->getOrder($order_id);
+            $osid = $order_info['shipping_code'];
+  $tkn = "T3BlbkNhcnQgTWFzdGVyIChzdXBvcnRlQG9wZW5jYXJ0bWFzdGVyLmNvbS5icik=";
+  $header = array('Accept: application/json', 'Content-Type: application/json;charset=UTF-8', 'Authorization: Bearer '. $token, 'User-Agent: ' . base64_decode($tkn) );
+  if($osid == 'melhorenvios.1' || $osid == 'melhorenvios.2' || $osid == 'melhorenvios.17') {
+  $conv = explode("||", $json_convert) ;
+  
+  $contei = count($conv) -1;
+      
+  for($i=0; $i < $contei; $i++) {   
+    $evento = $this->getacart($url, $conv[$i], $header);
+  }
+
+  } else {
+     $evento = $this->getacart($url, $json_convert, $header);
+  }
+  
+  $retornou = json_decode($evento, true);
+
+  if (array_key_exists("protocol", $retornou)) {
+  $this->db->query("UPDATE " . DB_PREFIX . "order_shipping SET post ='1', oid = '" . $this->db->escape($retornou['protocol']) . "', date_modified = NOW() WHERE order_id = '" . (int)$order_id . "'");
+  $this->session->data['success'] = "Enviado Frete para Carrinho no Melhor Envio";
+  } 
+
+  if (array_key_exists("errors", $retornou)) {
+  $this->error['warning'] = "OPS! algo deu errado ao enviar frete ao Melhor Envio";
+  }
+
+  $this->getList();
+  }
+
+  public function frete2() {
+  $this->load->language('sale/order');
+
+  $this->document->setTitle($this->language->get('heading_title'));
+
+  $this->load->model('sale/order');
+
+		if (isset($this->request->get['order_id'])) {
+			$order_id = $this->request->get['order_id'];
+            $os_query = $this->db->query("SELECT * FROM `" . DB_PREFIX . "order_shipping` WHERE order_id = '" . (int)$order_id . "'");
+            if ($os_query->num_rows) {
+            $xml = $os_query->row['nfe'];
+            $json = $os_query->row['service2'];	
+	        $json_convert = str_replace('NOTA-FISCAL', $xml, $json);
+  
+            }else {
+            $json_convert = '';	
+            }
+		} else {
+			$order_id = 0;
+            $json_convert = '';	
+		}
+
+  if ($this->config->get('melhorenvios_type') == 0) {
+  $url    = 'https://melhorenvio.com.br';
+  $token  = $this->config->get('melhorenvios_token');    
+  } else {
+  $url    = 'https://sandbox.melhorenvio.com.br';
+  $token  = $this->config->get('melhorenvios_token');        
+  }		  
+		    $order_info = $this->model_sale_order->getOrder($order_id);
+            $osid = $order_info['shipping_code'];
+  $tkn = "T3BlbkNhcnQgTWFzdGVyIChzdXBvcnRlQG9wZW5jYXJ0bWFzdGVyLmNvbS5icik=";
+  $header = array('Accept: application/json', 'Content-Type: application/json;charset=UTF-8', 'Authorization: Bearer '. $token, 'User-Agent: ' . base64_decode($tkn) );
+  if($osid == 'melhorenvios.1' || $osid == 'melhorenvios.2' || $osid == 'melhorenvios.17') {
+  $conv = explode("||", $json_convert) ;
+  
+  $contei = count($conv) -1;
+      
+  for($i=0; $i < $contei; $i++) {   
+    $evento = $this->getacart($url, $conv[$i], $header);
+  }
+
+  } else {
+     $evento = $this->getacart($url, $json_convert, $header);
+  }
+  
+  $retornou = json_decode($evento, true);
+
+  if (array_key_exists("protocol", $retornou)) {
+  $this->db->query("UPDATE " . DB_PREFIX . "order_shipping SET post ='1', oid = '" . $this->db->escape($retornou['protocol']) . "', date_modified = NOW() WHERE order_id = '" . (int)$order_id . "'");
+  $this->session->data['success'] = "Enviado Frete para Carrinho no Melhor Envio";
+  }
+  
+  if (array_key_exists("errors", $retornou)) {
+  $this->error['warning'] = "OPS! algo deu errado ao enviar frete ao Melhor Envio";
+  }    
+ 
+
+  $this->getList();
+  }
+  
+  
+  public function getacart($url, $json_convert, $header) {
+      
+  $soap_do = curl_init();
+  curl_setopt($soap_do, CURLOPT_URL, $url .'/api/v2/me/cart/');
+  curl_setopt($soap_do, CURLOPT_CONNECTTIMEOUT, 10);
+  curl_setopt($soap_do, CURLOPT_TIMEOUT,        10);
+  curl_setopt($soap_do, CURLOPT_CUSTOMREQUEST, "POST");
+  curl_setopt($soap_do, CURLOPT_RETURNTRANSFER, true );
+  curl_setopt($soap_do, CURLOPT_SSL_VERIFYPEER, false);
+  curl_setopt($soap_do, CURLOPT_SSL_VERIFYHOST, false);
+  curl_setopt($soap_do, CURLOPT_POST,           true );
+  curl_setopt($soap_do, CURLOPT_POSTFIELDS,     $json_convert);
+  curl_setopt($soap_do, CURLOPT_HTTPHEADER,     $header);
+  $response = curl_exec($soap_do); 
+  curl_close($soap_do);
+  
+  if($this->config->get('melhorenvios_debug')) {
+  $this->log->write('PAYLOAD ADMIN COM NOTA: MELHOR ENVIO API - '. $response);
+  }
+  
+  return $response; 
+      
+  }
+]]></add>
+</operation>
+<operation> 
+<search trim="true"><![CDATA['shipping_code' => $result['shipping_code'],]]></search>
+<add position="after"><![CDATA['frete'          => $this->url->link('sale/order/frete', 'token=' . $this->session->data['token'] . '&order_id=' . $result['order_id'] . $url, true),'frete2'          => $this->url->link('sale/order/frete2', 'token=' . $this->session->data['token'] . '&order_id=' . $result['order_id'] . $url, true),]]></add>
+</operation>
+</file>
+	
+<file path="admin/view/template/sale/order_list.tpl">
+<operation> 
+<search trim="true"><![CDATA[<?php if ($error_warning) { ?>]]></search>
+<add position="before"><![CDATA[<div id="mss"></div>]]></add>
+</operation>
+<operation> 
+<search trim="true"><![CDATA[<td class="text-left"><?php echo $order['customer']; ?></td>]]></search>
+<add position="replace"><![CDATA[<td class="text-left"><?php echo $order['customer']; ?><br><div id="notafiscal<?php echo $order['order_id']; ?>"><form  id="form-nfe<?php echo $order['order_id']; ?>">NFE XML<br><input type="text" name="nfe<?php echo $order['order_id']; ?>" id="nfe<?php echo $order['order_id']; ?>" value="<?php echo $order['nfe']; ?>" size="42" /><input type="button" value="Salvar" id="enviar<?php echo $order['order_id']; ?>" /></form>
+<script type="text/javascript"><!-- 
+<?php if($declaracao  || $order['shipping_code'] == 'melhorenvios.15' || $order['shipping_code'] == 'melhorenvios.16') { ?>
+$('#notafiscal<?php echo $order['order_id']; ?>').hide();
+<?php } ?>
+<?php if(!$order['ver']) { ?>
+$('#notafiscal<?php echo $order['order_id']; ?>').hide();
+<?php } ?>
+$('#enviar<?php echo $order["order_id"]; ?>').on('click', function() {
+	$.ajax({
+		url: 'index.php?route=sale/order/nota&token=<?php echo $token; ?>&nf<?php echo $order["order_id"]; ?>=' + $('#nfe<?php echo $order["order_id"]; ?>').val() +'&order_id=<?php echo $order["order_id"]; ?>',
+		type: 'post',
+		dataType: 'json',
+		data: $("#form-nfe<?php echo $order['order_id']; ?>").serialize(),
+		beforeSend: function() {
+			$('#enviar<?php echo $order["order_id"]; ?>').button('loading');
+		},
+		complete: function() {
+			$('#enviar<?php echo $order["order_id"]; ?>').button('reset');
+		},
+		success: function(json) {
+			$('.alert-success, .alert-danger').remove();
+			
+			if (json['error']) {
+				$('#mss').after('<div class="alert alert-danger"><i class="fa fa-exclamation-circle"></i> ' + json['error'] + '</div>');
+			}
+
+			if (json['success']) {
+				$('#mss').after('<div class="alert alert-success"><i class="fa fa-check-circle"></i> ' + json['success'] + '</div>');
+               document.location.reload(true);
+			}
+		}
+	});
+});
+//--></script>
+</div>
+</td>
+]]></add>
+</operation>
+<operation> 
+<search trim="true"><![CDATA[<td class="text-right"><a href="<?php echo $order['view']; ?>" data-toggle="tooltip" title="<?php echo $button_view; ?>" class="btn btn-info"><i class="fa fa-eye"></i></a> <a href="<?php echo $order['edit']; ?>" data-toggle="tooltip" title="<?php echo $button_edit; ?>" class="btn btn-primary"><i class="fa fa-pencil"></i></a> <a href="<?php echo $order['delete']; ?>" id="button-delete<?php echo $order['order_id']; ?>" data-toggle="tooltip" title="<?php echo $button_delete; ?>" class="btn btn-danger"><i class="fa fa-trash-o"></i></a></td>]]></search>
+<add position="replace"><![CDATA[<td class="text-right"><?php if($order['ver'] && $declaracao) { ?><a href="<?php echo $order['frete']; ?>" data-toggle="tooltip" title="Envio sem Nota Fiscal" class="btn btn-<?php if($order['post']) { echo 'danger'; } else {echo 'success';}?>"><i class="fa fa-cubes"></i></a><?php } ?> <?php if($order['ver'] && !$declaracao) { ?><a href="<?php echo $order['frete2']; ?>" data-toggle="tooltip" title="Envio com Nota Fiscal" <?php if(empty($order['nfe'])) { ?> style="display:none;"  <?php } ?> class="btn btn-<?php if($order['post']) { echo 'danger'; } else {echo 'warning';}?>"><i class="fa fa-file-text-o"></i></a><?php } ?><a href="<?php echo $order['view']; ?>" data-toggle="tooltip" title="<?php echo $button_view; ?>" class="btn btn-info"><i class="fa fa-eye"></i></a> <a href="<?php echo $order['edit']; ?>" data-toggle="tooltip" title="<?php echo $button_edit; ?>" class="btn btn-primary"><i class="fa fa-pencil"></i></a> <a href="<?php echo $order['delete']; ?>" id="button-delete<?php echo $order['order_id']; ?>" data-toggle="tooltip" title="<?php echo $button_delete; ?>" class="btn btn-danger"><i class="fa fa-trash-o"></i></a></td>
+]]></add>
+</operation>
+</file>
+<file path="system/library/cart.php">
+<operation> 
+<search trim="true"><![CDATA['weight'          => ($product_query->row['weight'] + $option_weight) * $quantity,]]></search>
+<add position="after"><![CDATA['weight2'         => ($product_query->row['weight'] + $option_weight),]]></add>
+</operation>
+</file>
+</modification>
